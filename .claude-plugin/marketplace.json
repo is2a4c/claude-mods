@@ -1,0 +1,20 @@
+{
+  "name": "claude-mods",
+  "owner": {
+    "name": "isaac"
+  },
+  "plugins": [
+    {
+      "name": "pulse",
+      "description": "Строка у выбора модели: контекст, расход за день и неделю в рублях, лимиты.",
+      "source": "./plugins/pulse",
+      "category": "development"
+    },
+    {
+      "name": "budget",
+      "description": "Журнал расхода в рублях, команда /spend и предупреждения о лимитах.",
+      "source": "./plugins/budget",
+      "category": "development"
+    }
+  ]
+}
