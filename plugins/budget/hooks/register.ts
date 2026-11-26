@@ -23,6 +23,7 @@ type LimitWarn = { day: string; limit: number }
 let rate: Rate | undefined
 let attemptedAt = 0
 let busy = false
+let configuredLimit = 0
 
 function asRate(value: unknown): Rate | undefined {
   if (typeof value !== 'object' || value === null) return undefined
@@ -90,6 +91,10 @@ async function writeKey($: EngineInterface, key: string, value: unknown): Promis
   try {
     await $.store.set(key, value)
   } catch {}
+}
+
+async function limitOf($: EngineInterface): Promise<number> {
+  return configuredLimit > 0 ? configuredLimit : asCount(await readKey($, LIMIT_KEY))
 }
 
 async function fetchRate($: EngineInterface): Promise<Rate | undefined> {
@@ -218,7 +223,7 @@ async function check($: EngineInterface): Promise<void> {
     }
   }
 
-  const limit = asCount(await readKey($, LIMIT_KEY))
+  const limit = await limitOf($)
   if (limit <= 0) return
   const now = await $.clock.now()
   const sums = await totals($, now)
@@ -249,7 +254,7 @@ async function report($: EngineInterface): Promise<string> {
   const context =
     typeof usage.context.percent === 'number' ? ` · контекст ${usage.context.percent}%` : ''
   lines.push(`Сессия: ${typeof sessionUsd === 'number' ? rubles(sessionUsd) : '—'}${context}`)
-  const limit = asCount(await readKey($, LIMIT_KEY))
+  const limit = await limitOf($)
   const course = rate ? `${rate.value.toFixed(4).replace('.', ',')} ₽` : 'нет'
   lines.push(`Курс: ${course}${limit > 0 ? ` · лимит ${Math.round(limit)} ₽/день` : ''}`)
   return lines.join('\n')
@@ -286,7 +291,10 @@ async function tick($: EngineInterface): Promise<void> {
   }
 }
 
-export const register: Register = (on) => {
+export const register: Register = (on, options) => {
+  const configured = Number(options.daily_limit_rub)
+  configuredLimit = Number.isFinite(configured) && configured > 0 ? configured : 0
+
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'spend',

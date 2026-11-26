@@ -1,5 +1,14 @@
 {
   "name": "budget",
-  "version": "0.1.0",
-  "description": "Spend ledger in rubles, /spend command, context and daily-limit warnings"
+  "version": "0.2.0",
+  "description": "Spend ledger in rubles, /spend command, context and daily-limit warnings",
+  "userConfig": {
+    "daily_limit_rub": {
+      "type": "number",
+      "title": "Дневной лимит, ₽",
+      "description": "Тост при превышении лимита; 0 — брать значение из /spend limit",
+      "default": 0,
+      "min": 0
+    }
+  }
 }
