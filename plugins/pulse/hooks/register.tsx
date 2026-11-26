@@ -13,6 +13,14 @@ let sessionSpent = 0
 let balanceBaseline = false
 let forceBalance = false
 let balanceAttemptedAt = 0
+let apiKey: string | undefined
+
+async function resolveKey($: EngineInterface): Promise<string | undefined> {
+  const base = await $.env.get('ANTHROPIC_BASE_URL')
+  if (!base || !/^https?:\/\/api\.deepseek\.com(\/|$)/.test(base)) return undefined
+  const token = await $.env.get('ANTHROPIC_AUTH_TOKEN')
+  return typeof token === 'string' && token.trim() ? token.trim() : undefined
+}
 
 function readBalance(stored: unknown): Balance | undefined {
   if (typeof stored !== 'object' || stored === null) return undefined
@@ -107,11 +115,9 @@ async function tick($: EngineInterface): Promise<void> {
   } catch {}
 }
 
-export const register: Register = (on, options) => {
-  const stored = options.deepseek_api_key
-  const apiKey = typeof stored === 'string' && stored.trim() ? stored.trim() : undefined
-
+export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
+    apiKey = await resolveKey($)
     sessionSpent = 0
     balanceBaseline = false
     forceBalance = true
