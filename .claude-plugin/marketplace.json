@@ -15,6 +15,12 @@
       "description": "Журнал расхода в рублях, команда /spend и предупреждения о лимитах.",
       "source": "./plugins/budget",
       "category": "development"
+    },
+    {
+      "name": "deepseek-peak",
+      "description": "Записка перед ответом в peak-часы DeepSeek.",
+      "source": "./plugins/deepseek-peak",
+      "category": "development"
     }
   ]
 }
