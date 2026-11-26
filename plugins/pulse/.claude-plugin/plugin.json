@@ -1,5 +1,14 @@
 {
   "name": "pulse",
-  "version": "0.4.1",
-  "description": "Status line: live DeepSeek balance and session spend in CNY"
+  "version": "0.5.0",
+  "description": "Status line: live DeepSeek balance and session spend in CNY",
+  "userConfig": {
+    "balance_warning_cny": {
+      "type": "number",
+      "title": "Порог баланса, ¥",
+      "description": "Тост, когда баланс опускается ниже порога; 0 — выключено",
+      "default": 0,
+      "min": 0
+    }
+  }
 }

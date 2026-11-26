@@ -14,6 +14,8 @@ let balanceBaseline = false
 let forceBalance = false
 let balanceAttemptedAt = 0
 let apiKey: string | undefined
+let warnBelow = 0
+let warnedBelow = false
 
 async function resolveKey($: EngineInterface): Promise<string | undefined> {
   const base = await $.env.get('ANTHROPIC_BASE_URL')
@@ -93,6 +95,14 @@ async function refreshBalance($: EngineInterface, key: string | undefined): Prom
   }
   balance = fetched
   balanceBaseline = true
+  if (warnBelow > 0) {
+    if (fetched.cny < warnBelow && !warnedBelow) {
+      warnedBelow = true
+      $.ui.toast(`Баланс ниже ${warnBelow} ¥`)
+    } else if (fetched.cny >= warnBelow) {
+      warnedBelow = false
+    }
+  }
 }
 
 function yuan(value: number): string {
@@ -115,7 +125,10 @@ async function tick($: EngineInterface): Promise<void> {
   } catch {}
 }
 
-export const register: Register = (on) => {
+export const register: Register = (on, options) => {
+  const threshold = Number(options.balance_warning_cny)
+  warnBelow = Number.isFinite(threshold) && threshold > 0 ? threshold : 0
+
   on('session.start', async ($, e, next) => {
     apiKey = await resolveKey($)
     sessionSpent = 0
