@@ -1,141 +1,126 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-const CBR_URL = 'https://www.cbr.ru/scripts/XML_daily.asp'
-const RATE_KEY = 'pulse.usd-rub'
-const RATE_TTL_MS = 12 * 60 * 60 * 1000
-const RETRY_MS = 30 * 60 * 1000
+const BALANCE_URL = 'https://api.deepseek.com/user/balance'
+const BALANCE_KEY = 'pulse.deepseek-balance'
+const BALANCE_TTL_MS = 60 * 1000
+const BALANCE_RETRY_MS = 60 * 1000
 const TICK_MS = 5000
 
-type Rate = { value: number; fetchedAt: number }
+type Balance = { cny: number; fetchedAt: number }
 
-let rate: Rate | undefined
-let attemptedAt = 0
+let balance: Balance | undefined
+let sessionSpent = 0
+let balanceBaseline = false
+let forceBalance = false
+let balanceAttemptedAt = 0
 
-function readRate(stored: unknown): Rate | undefined {
+function readBalance(stored: unknown): Balance | undefined {
   if (typeof stored !== 'object' || stored === null) return undefined
-  const value = (stored as { value?: unknown }).value
+  const cny = (stored as { cny?: unknown }).cny
   const fetchedAt = (stored as { fetchedAt?: unknown }).fetchedAt
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
+  if (typeof cny !== 'number' || !Number.isFinite(cny)) return undefined
   if (typeof fetchedAt !== 'number' || !Number.isFinite(fetchedAt)) return undefined
-  return { value, fetchedAt }
+  return { cny, fetchedAt }
 }
 
-async function loadStoredRate($: EngineInterface): Promise<Rate | undefined> {
+async function loadStoredBalance($: EngineInterface): Promise<Balance | undefined> {
   try {
-    return readRate(await $.store.get(RATE_KEY))
+    const stored = readBalance(await $.store.get(BALANCE_KEY))
+    if (!stored) return undefined
+    const now = await $.clock.now()
+    return now - stored.fetchedAt < 10 * 60 * 1000 ? stored : undefined
   } catch {
     return undefined
   }
 }
 
-async function fetchRate($: EngineInterface): Promise<Rate | undefined> {
+function parseBalance(text: string): number | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  const infos = (parsed as { balance_infos?: unknown }).balance_infos
+  if (!Array.isArray(infos)) return undefined
+  for (const info of infos) {
+    if (typeof info !== 'object' || info === null) continue
+    if ((info as { currency?: unknown }).currency !== 'CNY') continue
+    const total = Number((info as { total_balance?: unknown }).total_balance)
+    if (Number.isFinite(total)) return total
+  }
+  return undefined
+}
+
+async function fetchBalance($: EngineInterface, key: string): Promise<Balance | undefined> {
   try {
     const response = await Promise.race([
-      $.http.fetch(CBR_URL).catch(() => undefined),
+      $.http
+        .fetch(BALANCE_URL, { headers: { Authorization: `Bearer ${key}` } })
+        .catch(() => undefined),
       $.clock.sleep(5000).then(() => undefined),
     ])
     if (!response?.ok) return undefined
-    const block = response.text
-      .split('<Valute ')
-      .find((chunk) => chunk.includes('<CharCode>USD</CharCode>'))
-    if (!block) return undefined
-    const raw = block.match(/<Value>([\d.,]+)<\/Value>/)?.[1]
-    const nominal = Number(block.match(/<Nominal>([\d.,]+)<\/Nominal>/)?.[1]?.replace(',', '.') ?? '1')
-    const value = raw
-      ? Number(raw.replace(',', '.')) / (Number.isFinite(nominal) && nominal > 0 ? nominal : 1)
-      : NaN
-    if (!Number.isFinite(value) || value <= 0) return undefined
-    const fetched = { value, fetchedAt: await $.clock.now() }
-    await $.store.set(RATE_KEY, fetched)
+    const cny = parseBalance(response.text)
+    if (cny === undefined) return undefined
+    const fetched = { cny, fetchedAt: await $.clock.now() }
+    await $.store.set(BALANCE_KEY, fetched)
     return fetched
   } catch {
     return undefined
   }
 }
 
-async function refreshRate($: EngineInterface): Promise<void> {
+async function refreshBalance($: EngineInterface, key: string | undefined): Promise<void> {
+  if (!key) return
   const now = await $.clock.now()
-  if (rate && now - rate.fetchedAt < RATE_TTL_MS) return
-  if (now - attemptedAt < RETRY_MS) return
-  attemptedAt = now
-  const fetched = await fetchRate($)
-  if (fetched) rate = fetched
-}
-
-type Spend = { today: number; week: number }
-
-function dayStart(now: number): number {
-  const date = new Date(now)
-  date.setHours(0, 0, 0, 0)
-  return date.getTime()
-}
-
-async function readSpend($: EngineInterface): Promise<Spend | undefined> {
-  try {
-    const raw = await $.store.get('budget.ledger')
-    if (!Array.isArray(raw)) return undefined
-    const now = await $.clock.now()
-    const start = dayStart(now)
-    const weekStart = now - 7 * 24 * 60 * 60 * 1000
-    let today = 0
-    let week = 0
-    for (const item of raw) {
-      if (typeof item !== 'object' || item === null) continue
-      const at = (item as { at?: unknown }).at
-      const usd = (item as { usd?: unknown }).usd
-      if (typeof at !== 'number' || !Number.isFinite(at)) continue
-      if (typeof usd !== 'number' || !Number.isFinite(usd)) continue
-      if (at >= start) today += usd
-      if (at >= weekStart) week += usd
-    }
-    return { today, week }
-  } catch {
-    return undefined
+  if (!forceBalance && balance && now - balance.fetchedAt < BALANCE_TTL_MS) return
+  if (now - balanceAttemptedAt < BALANCE_RETRY_MS) return
+  balanceAttemptedAt = now
+  const fetched = await fetchBalance($, key)
+  forceBalance = false
+  if (!fetched) return
+  if (balanceBaseline && balance && fetched.cny < balance.cny) {
+    sessionSpent += balance.cny - fetched.cny
   }
+  balance = fetched
+  balanceBaseline = true
 }
 
-function money(usd: number, current: Rate | undefined): string {
-  if (!current) return `${usd.toFixed(2)}$`
-  const rub = usd * current.value
-  return `${rub < 100 ? rub.toFixed(1).replace('.', ',') : Math.round(rub)} ₽`
+function yuan(value: number): string {
+  return `${value.toFixed(2).replace('.', ',')} ¥`
 }
 
 function formatLine(
-  usage: Awaited<ReturnType<EngineInterface['session']['usage']>>,
-  current: Rate | undefined,
-  spend: Spend | undefined,
-): string {
+  currentBalance: Balance | undefined,
+  sessionCny: number | undefined,
+): string | undefined {
   const parts: string[] = []
-  if (typeof usage.context.percent === 'number') parts.push(`контекст ${usage.context.percent}%`)
-  if (spend) {
-    parts.push(`день ${money(spend.today, current)}`)
-    parts.push(`неделя ${money(spend.week, current)}`)
-  } else if (usage.cost) {
-    parts.push(money(usage.cost.usd, current))
-  } else {
-    parts.push('— ₽')
-  }
-  const five = usage.rateLimits.find((limit) => limit.kind === 'five_hour')
-  const week = usage.rateLimits.find((limit) => limit.kind === 'seven_day')
-  if (five) parts.push(`5ч ${Math.round(five.percentUsed)}%`)
-  if (week) parts.push(`7д ${Math.round(week.percentUsed)}%`)
-  return parts.join(' · ')
+  if (currentBalance) parts.push(`баланс ${yuan(currentBalance.cny)}`)
+  if (sessionCny !== undefined) parts.push(`сессия ${yuan(sessionCny)}`)
+  return parts.length > 0 ? parts.join(' · ') : undefined
 }
 
 async function tick($: EngineInterface): Promise<void> {
   try {
-    const spend = await readSpend($)
-    $.ui.status(formatLine(await $.session.usage(), rate, spend))
+    $.ui.status(formatLine(balance, balance ? sessionSpent : undefined))
   } catch {}
 }
 
-export const register: Register = (on) => {
+export const register: Register = (on, options) => {
+  const stored = options.deepseek_api_key
+  const apiKey = typeof stored === 'string' && stored.trim() ? stored.trim() : undefined
+
   on('session.start', async ($, e, next) => {
-    rate = await loadStoredRate($)
+    sessionSpent = 0
+    balanceBaseline = false
+    forceBalance = true
+    balanceAttemptedAt = 0
+    balance = apiKey ? await loadStoredBalance($) : undefined
     await tick($)
-    void refreshRate($).then(() => tick($))
+    void refreshBalance($, apiKey).then(() => tick($))
     $.clock.every(TICK_MS, async () => {
-      await refreshRate($)
+      await refreshBalance($, apiKey)
       await tick($)
     })
     return next(e)

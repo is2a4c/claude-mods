@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "pulse",
-      "description": "Строка у выбора модели: контекст, расход за день и неделю в рублях, лимиты.",
+      "description": "Строка у выбора модели: живой баланс DeepSeek и цена сессии в юанях.",
       "source": "./plugins/pulse",
       "category": "development"
     },
