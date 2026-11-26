@@ -24,6 +24,9 @@ let rate: Rate | undefined
 let attemptedAt = 0
 let busy = false
 let configuredLimit = 0
+let ctxWarnPercent = 75
+let keepMs = KEEP_MS
+let manualRate = 0
 
 function asRate(value: unknown): Rate | undefined {
   if (typeof value !== 'object' || value === null) return undefined
@@ -122,6 +125,10 @@ async function fetchRate($: EngineInterface): Promise<Rate | undefined> {
 
 async function ensureRate($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
+  if (manualRate > 0) {
+    rate = { value: manualRate, fetchedAt: now }
+    return
+  }
   if (rate && now - rate.fetchedAt < RATE_TTL_MS) return
   const pulse = asRate(await readKey($, PULSE_RATE_KEY))
   if (pulse && now - pulse.fetchedAt < RATE_TTL_MS) {
@@ -175,7 +182,7 @@ async function addUsd($: EngineInterface, now: number, usd: number): Promise<voi
   await writeKey(
     $,
     LEDGER_KEY,
-    entries.filter((entry) => entry.at >= now - KEEP_MS),
+    entries.filter((entry) => entry.at >= now - keepMs),
   )
 }
 
@@ -210,8 +217,9 @@ async function record($: EngineInterface): Promise<void> {
 async function check($: EngineInterface): Promise<void> {
   const usage = await $.session.usage()
   const percent = usage.context.percent
-  if (typeof percent === 'number' && percent >= 75) {
-    const level = percent >= 90 ? 90 : 75
+  if (ctxWarnPercent > 0 && typeof percent === 'number' && percent >= ctxWarnPercent) {
+    let level = ctxWarnPercent
+    if (90 > ctxWarnPercent && percent >= 90) level = 90
     const previous = asCtxWarn(await readKey($, CTX_KEY))
     if (!previous || previous.startedAt !== usage.startedAt || previous.level < level) {
       await writeKey($, CTX_KEY, { startedAt: usage.startedAt, level })
@@ -294,6 +302,12 @@ async function tick($: EngineInterface): Promise<void> {
 export const register: Register = (on, options) => {
   const configured = Number(options.daily_limit_rub)
   configuredLimit = Number.isFinite(configured) && configured > 0 ? configured : 0
+  const ctx = Number(options.context_warning_percent)
+  ctxWarnPercent = Number.isFinite(ctx) && ctx > 0 ? Math.min(ctx, 100) : 0
+  const days = Number(options.keep_days)
+  keepMs = Number.isFinite(days) && days > 0 ? Math.min(days, 365) * 24 * 60 * 60 * 1000 : KEEP_MS
+  const manual = Number(options.manual_rate_rub)
+  manualRate = Number.isFinite(manual) && manual > 0 ? manual : 0
 
   on('session.start', async ($, e, next) => {
     await $.command.register({

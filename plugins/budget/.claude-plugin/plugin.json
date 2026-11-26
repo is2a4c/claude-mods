@@ -1,12 +1,35 @@
 {
   "name": "budget",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Spend ledger in rubles, /spend command, context and daily-limit warnings",
   "userConfig": {
     "daily_limit_rub": {
       "type": "number",
       "title": "Дневной лимит, ₽",
       "description": "Тост при превышении лимита; 0 — брать значение из /spend limit",
+      "default": 0,
+      "min": 0
+    },
+    "context_warning_percent": {
+      "type": "number",
+      "title": "Порог контекста, %",
+      "description": "Тост при заполнении контекста; второй тост — на 90%; 0 — выключить",
+      "default": 75,
+      "min": 0,
+      "max": 100
+    },
+    "keep_days": {
+      "type": "number",
+      "title": "Хранить журнал, дней",
+      "description": "Сколько дней хранить записи расхода",
+      "default": 30,
+      "min": 1,
+      "max": 365
+    },
+    "manual_rate_rub": {
+      "type": "number",
+      "title": "Курс USD/RUB вручную",
+      "description": "Фиксированный курс для пересчёта в рубли; 0 — курс ЦБ",
       "default": 0,
       "min": 0
     }
